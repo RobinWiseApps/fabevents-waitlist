@@ -42,6 +42,7 @@ header .tag {
 }
 
 p { margin: 0 0 14px; }
+a { color: var(--accent); }
 .muted { color: var(--muted); }
 .small { font-size: 0.85rem; }
 
