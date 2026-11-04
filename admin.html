@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>FaB Events waitlist – entries</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <header>
+    <p class="tag">FaB Events waitlist</p>
+    <h1>Entries</h1>
+    <p class="muted">Readable only by robinwiseapps@gmail.com (Firestore rules).</p>
+  </header>
+
+  <section class="card" id="login">
+    <button id="signin">Sign in with Google</button>
+    <div id="login-status" class="status"></div>
+  </section>
+
+  <section class="card" id="list" hidden>
+    <div class="toolbar">
+      <span class="count" id="count">–</span>
+      <span class="muted" id="breakdown"></span>
+      <span style="flex:1"></span>
+      <button id="csv" class="secondary">Download CSV</button>
+      <button id="reload" class="secondary">Reload</button>
+    </div>
+    <div id="status" class="status"></div>
+    <div style="overflow-x:auto; margin-top:12px">
+      <table>
+        <thead><tr><th>When</th><th>Name</th><th>Email</th><th>Phone</th><th></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<script type="module">
+  import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js';
+  import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged }
+    from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js';
+  import { getFirestore, collection, getDocs, doc, deleteDoc }
+    from 'https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore-lite.js';
+  import { firebaseConfig, collectionName } from './firebase-config.js';
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+
+  const loginCard = document.getElementById('login');
+  const loginStatus = document.getElementById('login-status');
+  const listCard = document.getElementById('list');
+  const status = document.getElementById('status');
+  const rows = document.getElementById('rows');
+  let entries = [];
+
+  document.getElementById('signin').addEventListener('click', async () => {
+    loginStatus.className = 'status';
+    loginStatus.textContent = '';
+    try {
+      await signInWithPopup(auth, new GoogleAuthProvider());
+    } catch (e) {
+      loginStatus.className = 'status error';
+      loginStatus.textContent = 'Sign-in failed: ' + (e.code || e.message);
+    }
+  });
+
+  onAuthStateChanged(auth, (user) => {
+    loginCard.hidden = !!user;
+    listCard.hidden = !user;
+    if (user) load();
+  });
+
+  const platformLabel = { android: 'Android', ios: 'iPhone', both: 'Both' };
+
+  function fmt(ts) {
+    if (!ts) return '';
+    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    return d.toISOString().slice(0, 16).replace('T', ' ');
+  }
+
+  async function load() {
+    status.className = 'status';
+    status.textContent = 'Loading…';
+    try {
+      const snap = await getDocs(collection(db, collectionName));
+      entries = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      entries.sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+      render();
+      status.textContent = '';
+    } catch (e) {
+      status.className = 'status error';
+      status.textContent = 'Could not read the list: ' + (e.code || e.message)
+        + (e.code === 'permission-denied' ? ' (not signed in as the reader, or the rules block is not published)' : '');
+    }
+  }
+
+  function render() {
+    document.getElementById('count').textContent = entries.length;
+    const by = {};
+    for (const e of entries) by[e.platform] = (by[e.platform] || 0) + 1;
+    document.getElementById('breakdown').textContent =
+      Object.entries(by).map(([k, v]) => `${platformLabel[k] || k} ${v}`).join(' · ');
+    rows.innerHTML = '';
+    for (const e of entries) {
+      const tr = document.createElement('tr');
+      const cells = [fmt(e.createdAt), e.name || '', e.email || '', platformLabel[e.platform] || e.platform || ''];
+      for (const c of cells) {
+        const td = document.createElement('td');
+        td.textContent = c;
+        tr.appendChild(td);
+      }
+      const td = document.createElement('td');
+      const del = document.createElement('button');
+      del.className = 'secondary';
+      del.textContent = 'Remove';
+      del.addEventListener('click', async () => {
+        if (!confirm(`Remove ${e.email} from the list?`)) return;
+        try {
+          await deleteDoc(doc(db, collectionName, e.id));
+          entries = entries.filter(x => x.id !== e.id);
+          render();
+        } catch (err) {
+          status.className = 'status error';
+          status.textContent = 'Remove failed: ' + (err.code || err.message);
+        }
+      });
+      td.appendChild(del);
+      tr.appendChild(td);
+      rows.appendChild(tr);
+    }
+  }
+
+  function csvCell(v) {
+    const s = String(v ?? '');
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+
+  document.getElementById('csv').addEventListener('click', () => {
+    const lines = ['createdAt,name,email,platform'];
+    for (const e of entries) {
+      lines.push([fmt(e.createdAt), e.name, e.email, e.platform].map(csvCell).join(','));
+    }
+    const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `fabevents-waitlist-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  document.getElementById('reload').addEventListener('click', load);
+</script>
+</body>
+</html>

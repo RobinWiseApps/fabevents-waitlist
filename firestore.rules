@@ -1,0 +1,39 @@
+// fabevents-waitlist: the fabEventsWaitlist block for the shared Firebase
+// project (robinwiseapps-c4e9e). NOT a whole rules file: the project's rules
+// also hold the other apps' blocks (RobinCalender, Easy Lists, bugReports).
+// Paste the `match /fabEventsWaitlist/...` block INSIDE the existing
+// `match /databases/{database}/documents { ... }`, next to the other blocks,
+// and leave those untouched.
+//
+// Anyone may add themselves once (index.html; the document id is the SHA-256
+// of the lower-cased email, and only create is allowed, so a second sign-up
+// with the same email is refused instead of overwriting). Reading and
+// removing is for Robin's Google account only (admin.html).
+
+    match /fabEventsWaitlist/{entryId} {
+      function isListReader() {
+        return request.auth != null
+          && request.auth.token.firebase.sign_in_provider == 'google.com'
+          && request.auth.token.email_verified == true
+          && request.auth.token.email == 'robinwiseapps@gmail.com';
+      }
+
+      allow read, delete: if isListReader();
+      allow update: if false;
+      allow create: if
+        request.resource.data.keys().hasOnly(['name', 'email', 'platform',
+            'createdAt', 'source'])
+        && request.resource.data.keys().hasAll(['name', 'email', 'platform',
+            'createdAt', 'source'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 80
+        && request.resource.data.email is string
+        && request.resource.data.email.size() >= 5
+        && request.resource.data.email.size() <= 120
+        && request.resource.data.email == request.resource.data.email.lower()
+        && request.resource.data.email.matches('^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$')
+        && request.resource.data.platform in ['android', 'ios', 'both']
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.source == 'web';
+    }
